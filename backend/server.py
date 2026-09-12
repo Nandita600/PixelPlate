@@ -2319,7 +2319,7 @@ async def seed():
             90,
 
             "image_url":
-            "https://images.pexels.com/photos/29650995/pexels-photo-29650995.jpeg?auto=compress&cs=tinysrgb&w=800",
+            "https://images.pexels.com/photos/29650995/pexels-photo-29650995.jpeg?auto=compress&cs=tinysrgb&w=800",s
             "featured":
             False,
 
@@ -2496,22 +2496,14 @@ app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
-
-    allow_credentials=True,
-
     allow_origins=[
+        "https://pixelplate-frontend.onrender.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://192.168.1.5:3000",
     ],
-
-    allow_methods=[
-        "*"
-    ],
-
-    allow_headers=[
-        "*"
-    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
