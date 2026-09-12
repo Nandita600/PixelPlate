@@ -2319,7 +2319,7 @@ async def seed():
             90,
 
             "image_url":
-            "https://images.pexels.com/photos/29650995/pexels-photo-29650995.jpeg?auto=compress&cs=tinysrgb&w=800",s
+            "https://images.pexels.com/photos/29650995/pexels-photo-29650995.jpeg?auto=compress&cs=tinysrgb&w=800",
             "featured":
             False,
 
