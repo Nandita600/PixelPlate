@@ -21,11 +21,18 @@ import {
 } from "lucide-react";
 import "@/App.css";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+/* =====================================================
+   API CONFIGURATION
+===================================================== */
+
+const API = "https://pixelplate-backend.onrender.com/api";
 
 const api = axios.create({
   baseURL: API,
-  withCredentials: true
+  withCredentials: true,
+  headers: {
+    "Content-Type": "application/json"
+  }
 });
 
 /* =====================================================
@@ -39,24 +46,24 @@ const loadRazorpay = () => {
       return;
     }
 
-    const script =
-      document.createElement("script");
+    const script = document.createElement("script");
 
     script.src =
       "https://checkout.razorpay.com/v1/checkout.js";
 
-    script.onload = () =>
-      resolve(true);
-
-    script.onerror = () =>
-      resolve(false);
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
 
     document.body.appendChild(script);
   });
 };
 
+/* =====================================================
+   HELPERS
+===================================================== */
+
 const money = (n) =>
-  `₹${Number(n).toLocaleString("en-IN")}`;
+  `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 const statusSteps = [
   "received",
@@ -85,14 +92,11 @@ const normalizeTable = (value) => {
 };
 
 const getTableFromQR = () => {
-  const params =
-    new URLSearchParams(
-      window.location.search
-    );
-
-  return normalizeTable(
-    params.get("table")
+  const params = new URLSearchParams(
+    window.location.search
   );
+
+  return normalizeTable(params.get("table"));
 };
 
 /* =====================================================
@@ -197,23 +201,27 @@ function Header({
 ===================================================== */
 
 function CustomerMenu() {
-  const [items, setItems] =
-    useState([]);
+  const [items, setItems] = useState([]);
 
-  const [search, setSearch] =
+  const [search, setSearch] = useState("");
+
+  const [category, setCategory] = useState("All");
+
+  const [menuLoading, setMenuLoading] =
+    useState(true);
+
+  const [menuError, setMenuError] =
     useState("");
 
-  const [category, setCategory] =
-    useState("All");
-
-  const [cart, setCart] =
-    useState(() =>
-      JSON.parse(
-        localStorage.getItem(
-          "pp_cart"
-        ) || "[]"
-      )
-    );
+  const [cart, setCart] = useState(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem("pp_cart") || "[]"
+      );
+    } catch {
+      return [];
+    }
+  });
 
   const [tableNumber, setTableNumber] =
     useState(() =>
@@ -224,7 +232,56 @@ function CustomerMenu() {
       ""
     );
 
+  /* =================================================
+     LOAD MENU
+  ================================================= */
+
   useEffect(() => {
+    const loadMenu = async () => {
+      try {
+        setMenuLoading(true);
+        setMenuError("");
+
+        console.log(
+          "PixelPlate API:",
+          API
+        );
+
+        const response =
+          await api.get("/menu");
+
+        console.log(
+          "MENU API RESPONSE:",
+          response.data
+        );
+
+        const menuData =
+          Array.isArray(response.data)
+            ? response.data
+            : [];
+
+        setItems(menuData);
+      } catch (error) {
+        console.error(
+          "MENU API FAILED:",
+          error
+        );
+
+        console.error(
+          "MENU API URL:",
+          `${API}/menu`
+        );
+
+        setItems([]);
+
+        setMenuError(
+          "Unable to load the menu. Please refresh the page."
+        );
+      } finally {
+        setMenuLoading(false);
+      }
+    };
+
     const qrTable =
       getTableFromQR();
 
@@ -234,41 +291,53 @@ function CustomerMenu() {
         qrTable
       );
 
-      setTableNumber(
-        qrTable
-      );
+      setTableNumber(qrTable);
     }
 
-    api
-      .get("/menu")
-      .then((r) =>
-        setItems(r.data)
-      )
-      .catch(() => {});
+    loadMenu();
   }, []);
+
+  /* =================================================
+     CATEGORIES
+  ================================================= */
 
   const categories = [
     "All",
     ...new Set(
-      items.map(
-        (x) => x.category
-      )
+      items
+        .map((item) => item.category)
+        .filter(Boolean)
     )
   ];
 
-  const shown =
-    items.filter(
-      (x) =>
+  /* =================================================
+     FILTERED MENU
+  ================================================= */
+
+  const shown = items.filter(
+    (item) => {
+      const itemName =
+        item.name || "";
+
+      const description =
+        item.description || "";
+
+      const itemCategory =
+        item.category || "";
+
+      return (
         (
           category === "All" ||
-          x.category === category
+          itemCategory === category
         ) &&
-        `${x.name} ${x.description}`
+        `${itemName} ${description}`
           .toLowerCase()
           .includes(
             search.toLowerCase()
           )
-    );
+      );
+    }
+  );
 
   /* =================================================
      ADD TO CART
@@ -341,13 +410,12 @@ function CustomerMenu() {
   return (
     <>
       <Header
-        cartCount={
-          cartQuantity
-        }
+        cartCount={cartQuantity}
       />
 
       <main className="customer-page">
         <section className="welcome-band">
+
           {/* FLOATING FOOD DECORATIONS */}
 
           <div className="floating-food food-1">
@@ -376,11 +444,11 @@ function CustomerMenu() {
 
           {/* GLOWING PARTICLES */}
 
-          <div className="hero-particle particle-1"></div>
-          <div className="hero-particle particle-2"></div>
-          <div className="hero-particle particle-3"></div>
-          <div className="hero-particle particle-4"></div>
-          <div className="hero-particle particle-5"></div>
+          <div className="hero-particle particle-1" />
+          <div className="hero-particle particle-2" />
+          <div className="hero-particle particle-3" />
+          <div className="hero-particle particle-4" />
+          <div className="hero-particle particle-5" />
 
           <div>
             <p className="eyebrow">
@@ -451,6 +519,10 @@ function CustomerMenu() {
           </div>
         </section>
 
+        {/* =================================================
+            MENU SECTION
+        ================================================= */}
+
         <section
           id="menu"
           className="menu-section"
@@ -482,126 +554,200 @@ function CustomerMenu() {
             </div>
           </div>
 
-          <div className="category-row">
-            {categories.map(
-              (c) => (
-                <button
-                  className={
-                    category === c
-                      ? "category active"
-                      : "category"
-                  }
-                  onClick={() =>
-                    setCategory(c)
-                  }
-                  key={c}
-                  data-testid={`category-${c
-                    .toLowerCase()
-                    .replaceAll(
-                      " ",
-                      "-"
-                    )}`}
-                >
-                  {c}
-                </button>
-              )
+          {/* CATEGORY BUTTONS */}
+
+          {!menuLoading &&
+            !menuError &&
+            items.length > 0 && (
+              <div className="category-row">
+                {categories.map(
+                  (c) => (
+                    <button
+                      className={
+                        category === c
+                          ? "category active"
+                          : "category"
+                      }
+                      onClick={() =>
+                        setCategory(c)
+                      }
+                      key={c}
+                      data-testid={`category-${c
+                        .toLowerCase()
+                        .replaceAll(
+                          " ",
+                          "-"
+                        )}`}
+                    >
+                      {c}
+                    </button>
+                  )
+                )}
+              </div>
             )}
-          </div>
 
-          <div className="menu-grid">
-            {shown.map(
-              (item) => (
-                <article
-                  className="dish-card"
-                  key={item.id}
-                  data-testid={`menu-item-${item.id}`}
-                >
-                  <div className="dish-image">
-                    <img
-                      src={
-                        item.image_url
-                      }
-                      alt={
-                        item.name
-                      }
-                    />
+          {/* MENU LOADING */}
 
-                    {item.featured && (
-                      <span className="featured">
-                        FEATURED
-                      </span>
-                    )}
-                  </div>
+          {menuLoading && (
+            <div className="empty-state">
+              <ChefHat size={30} />
 
-                  <div className="dish-copy">
-                    <div className="dish-meta">
-                      <span>
-                        {
-                          item.category
-                        }
-                      </span>
+              <h3>
+                Loading the menu...
+              </h3>
 
-                      <span>
-                        <Star
-                          size={13}
-                          fill="currentColor"
-                        />
-                        {" "}
-                        {
-                          item.rating
-                        }
-                      </span>
-                    </div>
-
-                    <h3>
-                      {
-                        item.name
-                      }
-                    </h3>
-
-                    <p>
-                      {
-                        item.description
-                      }
-                    </p>
-
-                    <div className="dish-bottom">
-                      <strong>
-                        {money(
-                          item.price
-                        )}
-                      </strong>
-
-                      <button
-                        className="add-button"
-                        onClick={() =>
-                          add(
-                            item
-                          )
-                        }
-                        data-testid={`add-item-${item.id}`}
-                      >
-                        Add
-
-                        <span>
-                          +
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              )
-            )}
-          </div>
-
-          {!shown.length && (
-            <div
-              className="empty-state"
-              data-testid="menu-empty-state"
-            >
-              No dishes match that search.
+              <p>
+                Fresh dishes are on their way.
+              </p>
             </div>
           )}
+
+          {/* MENU ERROR */}
+
+          {!menuLoading &&
+            menuError && (
+              <div className="empty-state">
+                <ChefHat size={30} />
+
+                <h3>
+                  Menu unavailable
+                </h3>
+
+                <p>
+                  {menuError}
+                </p>
+
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() =>
+                    window.location.reload()
+                  }
+                >
+                  Refresh menu
+                </button>
+              </div>
+            )}
+
+          {/* MENU GRID */}
+
+          {!menuLoading &&
+            !menuError &&
+            items.length > 0 && (
+              <div className="menu-grid">
+                {shown.map(
+                  (item) => (
+                    <article
+                      className="dish-card"
+                      key={item.id}
+                      data-testid={`menu-item-${item.id}`}
+                    >
+                      <div className="dish-image">
+                        <img
+                          src={
+                            item.image_url
+                          }
+                          alt={
+                            item.name
+                          }
+                        />
+
+                        {item.featured && (
+                          <span className="featured">
+                            FEATURED
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="dish-copy">
+                        <div className="dish-meta">
+                          <span>
+                            {
+                              item.category
+                            }
+                          </span>
+
+                          <span>
+                            <Star
+                              size={13}
+                              fill="currentColor"
+                            />
+                            {" "}
+                            {
+                              item.rating ??
+                              "4.5"
+                            }
+                          </span>
+                        </div>
+
+                        <h3>
+                          {
+                            item.name
+                          }
+                        </h3>
+
+                        <p>
+                          {
+                            item.description
+                          }
+                        </p>
+
+                        <div className="dish-bottom">
+                          <strong>
+                            {money(
+                              item.price
+                            )}
+                          </strong>
+
+                          <button
+                            className="add-button"
+                            onClick={() =>
+                              add(
+                                item
+                              )
+                            }
+                            data-testid={`add-item-${item.id}`}
+                          >
+                            Add
+
+                            <span>
+                              +
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                )}
+              </div>
+            )}
+
+          {/* SEARCH EMPTY */}
+
+          {!menuLoading &&
+            !menuError &&
+            items.length > 0 &&
+            !shown.length && (
+              <div
+                className="empty-state"
+                data-testid="menu-empty-state"
+              >
+                No dishes match that search.
+              </div>
+            )}
+
+          {/* NO DATABASE ITEMS */}
+
+          {!menuLoading &&
+            !menuError &&
+            items.length === 0 && (
+              <div
+                className="empty-state"
+                data-testid="menu-empty-state"
+              >
+                No menu items are available.
+              </div>
+            )}
         </section>
       </main>
 
@@ -635,9 +781,7 @@ function CustomerMenu() {
 
           <div className="floating-cart-total">
             <strong>
-              {money(
-                cartTotal
-              )}
+              {money(cartTotal)}
             </strong>
 
             <ChevronRight size={20} />
@@ -657,85 +801,75 @@ function Cart() {
     useState([]);
 
   useEffect(() => {
-    const saved =
-      JSON.parse(
-        localStorage.getItem(
-          "pp_cart"
-        ) || "[]"
-      );
+    try {
+      const saved =
+        JSON.parse(
+          localStorage.getItem(
+            "pp_cart"
+          ) || "[]"
+        );
 
-    setCart(saved);
+      setCart(
+        Array.isArray(saved)
+          ? saved
+          : []
+      );
+    } catch {
+      setCart([]);
+    }
   }, []);
 
-  const saveCart =
-    (next) => {
-      setCart(next);
+  const saveCart = (next) => {
+    setCart(next);
 
-      localStorage.setItem(
-        "pp_cart",
-        JSON.stringify(next)
-      );
+    localStorage.setItem(
+      "pp_cart",
+      JSON.stringify(next)
+    );
+  };
+
+  const increase = (index) => {
+    const next = [...cart];
+
+    next[index] = {
+      ...next[index],
+      quantity:
+        Number(
+          next[index].quantity || 1
+        ) + 1
     };
 
-  const increase =
-    (index) => {
-      const next = [
-        ...cart
-      ];
+    saveCart(next);
+  };
 
+  const decrease = (index) => {
+    const next = [...cart];
+
+    const quantity =
+      Number(
+        next[index].quantity || 1
+      );
+
+    if (quantity <= 1) {
+      next.splice(index, 1);
+    } else {
       next[index] = {
         ...next[index],
         quantity:
-          Number(
-            next[index]
-              .quantity || 1
-          ) + 1
+          quantity - 1
       };
+    }
 
-      saveCart(next);
-    };
+    saveCart(next);
+  };
 
-  const decrease =
-    (index) => {
-      const next = [
-        ...cart
-      ];
+  const remove = (index) => {
+    const next = [...cart];
 
-      const quantity =
-        Number(
-          next[index]
-            .quantity || 1
-        );
+    next.splice(index, 1);
 
-      if (quantity <= 1) {
-        next.splice(
-          index,
-          1
-        );
-      } else {
-        next[index] = {
-          ...next[index],
-          quantity:
-            quantity - 1
-        };
-      }
-
-      saveCart(next);
-    };
-
-  const remove =
-    (index) => {
-      const next = [
-        ...cart
-      ];
-
-      next.splice(
-        index,
-        1
-      );
-
-      saveCart(next);
-    };
+    saveCart(next);
+  };
 
   const total =
     cart.reduce(
@@ -763,9 +897,7 @@ function Cart() {
   return (
     <>
       <Header
-        cartCount={
-          totalItems
-        }
+        cartCount={totalItems}
       />
 
       <main className="narrow-page cart-page">
@@ -809,14 +941,12 @@ function Cart() {
                 (item, index) => {
                   const quantity =
                     Number(
-                      item.quantity ||
-                        1
+                      item.quantity || 1
                     );
 
                   const itemTotal =
                     Number(
-                      item.price ||
-                        0
+                      item.price || 0
                     ) *
                     quantity;
 
@@ -922,9 +1052,7 @@ function Cart() {
                 </span>
 
                 <strong>
-                  {
-                    totalItems
-                  }
+                  {totalItems}
                 </strong>
               </div>
 
@@ -934,9 +1062,7 @@ function Cart() {
                 </span>
 
                 <strong>
-                  {money(
-                    total
-                  )}
+                  {money(total)}
                 </strong>
               </div>
 
@@ -948,9 +1074,7 @@ function Cart() {
                 </span>
 
                 <strong>
-                  {money(
-                    total
-                  )}
+                  {money(total)}
                 </strong>
               </div>
 
@@ -960,9 +1084,7 @@ function Cart() {
               >
                 Continue to checkout
 
-                <ChevronRight
-                  size={18}
-                />
+                <ChevronRight size={18} />
               </Link>
 
               <Link
@@ -985,13 +1107,17 @@ function Cart() {
 
 function Checkout() {
   const [cart] =
-    useState(() =>
-      JSON.parse(
-        localStorage.getItem(
-          "pp_cart"
-        ) || "[]"
-      )
-    );
+    useState(() => {
+      try {
+        return JSON.parse(
+          localStorage.getItem(
+            "pp_cart"
+          ) || "[]"
+        );
+      } catch {
+        return [];
+      }
+    });
 
   const savedTable =
     normalizeTable(
@@ -1004,8 +1130,7 @@ function Checkout() {
     useState({
       customer_name: "",
       phone: "",
-      table_number:
-        savedTable
+      table_number: savedTable
     });
 
   const [message, setMessage] =
@@ -1030,302 +1155,256 @@ function Checkout() {
   const hasQRTable =
     Boolean(savedTable);
 
-  const start =
-    async () => {
-      try {
-        setMessage("");
-        setProcessing(
-          true
-        );
+  const start = async () => {
+    try {
+      setMessage("");
+      setProcessing(true);
 
-        if (!form.customer_name) {
-          setMessage(
-            "Please enter your name."
-          );
-
-          setProcessing(
-            false
-          );
-
-          return;
-        }
-
-        if (!form.phone) {
-          setMessage(
-            "Please enter your mobile number."
-          );
-
-          setProcessing(
-            false
-          );
-
-          return;
-        }
-
-        if (!form.table_number) {
-          setMessage(
-            "Please scan the table QR code or enter a table number."
-          );
-
-          setProcessing(
-            false
-          );
-
-          return;
-        }
-
-        if (!cart.length) {
-          setMessage(
-            "Your cart is empty."
-          );
-
-          setProcessing(
-            false
-          );
-
-          return;
-        }
-
-        /* Load Razorpay */
-
-        const loaded =
-          await loadRazorpay();
-
-        if (!loaded) {
-          setMessage(
-            "Payment system could not be loaded. Please check your internet connection."
-          );
-
-          setProcessing(
-            false
-          );
-
-          return;
-        }
-
-        /* Prepare Order */
-
-        const payload = {
-          ...form,
-
-          items: cart.map(
-            (item) => ({
-              item_id:
-                item.id,
-
-              name:
-                item.name,
-
-              quantity:
-                Number(
-                  item.quantity ||
-                    1
-                ),
-
-              price:
-                Number(
-                  item.price ||
-                    0
-                ),
-
-              add_ons: []
-            })
-          ),
-
-          total
-        };
-
+      if (!form.customer_name) {
         setMessage(
-          "Creating secure payment..."
+          "Please enter your name."
         );
 
-        /* Create Razorpay Order */
-
-        const response =
-          await api.post(
-            "/payments/create-order",
-            payload
-          );
-
-        if (
-          !response.data
-            ?.available
-        ) {
-          setMessage(
-            response.data
-              ?.message ||
-              "Razorpay payment is not available."
-          );
-
-          setProcessing(
-            false
-          );
-
-          return;
-        }
-
-        const razorpayOrder =
-          response.data.order;
-
-        /* Razorpay Options */
-
-        const options = {
-          key:
-            response.data
-              .key_id,
-
-          amount:
-            razorpayOrder.amount,
-
-          currency:
-            razorpayOrder.currency,
-
-          name:
-            "PixelPlate",
-
-          description:
-            "Restaurant Order",
-
-          order_id:
-            razorpayOrder.id,
-
-          prefill: {
-            name:
-              form.customer_name,
-
-            contact:
-              form.phone
-          },
-
-          theme: {
-            color:
-              "#111111"
-          },
-
-          handler:
-            async function (
-              paymentResponse
-            ) {
-              try {
-                setMessage(
-                  "Verifying payment..."
-                );
-
-                const verify =
-                  await api.post(
-                    "/payments/verify",
-                    paymentResponse
-                  );
-
-                localStorage.setItem(
-                  "pp_last_order",
-                  verify.data.id
-                );
-
-                localStorage.removeItem(
-                  "pp_cart"
-                );
-
-                localStorage.removeItem(
-                  "pp_table_number"
-                );
-
-                window.location.href =
-                  `/order/${verify.data.id}`;
-
-              } catch (error) {
-                console.error(
-                  "Payment verification error:",
-                  error
-                );
-
-                setProcessing(
-                  false
-                );
-
-                const detail =
-                  error.response?.data
-                    ?.detail;
-
-                setMessage(
-                  typeof detail ===
-                    "string"
-                    ? detail
-                    : detail?.[0]
-                        ?.msg ||
-                      "Payment verification failed. Please contact staff."
-                );
-              }
-            },
-
-          modal: {
-            ondismiss:
-              function () {
-                setProcessing(
-                  false
-                );
-
-                setMessage(
-                  "Payment cancelled."
-                );
-              }
-          }
-        };
-
-        /* Open Razorpay */
-
-        const razorpay =
-          new window.Razorpay(
-            options
-          );
-
-        razorpay.on(
-          "payment.failed",
-          function () {
-            setProcessing(
-              false
-            );
-
-            setMessage(
-              "Payment failed. Please try again."
-            );
-          }
-        );
-
-        razorpay.open();
-
-      } catch (e) {
-        console.error(
-          "Razorpay error:",
-          e
-        );
-
-        setProcessing(
-          false
-        );
-
-        const detail =
-          e.response?.data?.detail;
-
-        setMessage(
-          typeof detail ===
-            "string"
-            ? detail
-            : Array.isArray(
-                detail
-              )
-              ? detail
-                  .map(
-                    (item) =>
-                      item?.msg ||
-                      "Invalid input"
-                  )
-                  .join(", ")
-              : detail?.msg ||
-                "We could not start the payment. Please try again."
-        );
+        setProcessing(false);
+        return;
       }
-    };
+
+      if (!form.phone) {
+        setMessage(
+          "Please enter your mobile number."
+        );
+
+        setProcessing(false);
+        return;
+      }
+
+      if (!form.table_number) {
+        setMessage(
+          "Please scan the table QR code or enter a table number."
+        );
+
+        setProcessing(false);
+        return;
+      }
+
+      if (!cart.length) {
+        setMessage(
+          "Your cart is empty."
+        );
+
+        setProcessing(false);
+        return;
+      }
+
+      const loaded =
+        await loadRazorpay();
+
+      if (!loaded) {
+        setMessage(
+          "Payment system could not be loaded. Please check your internet connection."
+        );
+
+        setProcessing(false);
+        return;
+      }
+
+      const payload = {
+        ...form,
+
+        items: cart.map(
+          (item) => ({
+            item_id: item.id,
+            name: item.name,
+            quantity:
+              Number(
+                item.quantity || 1
+              ),
+            price:
+              Number(
+                item.price || 0
+              ),
+            add_ons: []
+          })
+        ),
+
+        total
+      };
+
+      setMessage(
+        "Creating secure payment..."
+      );
+
+      const response =
+        await api.post(
+          "/payments/create-order",
+          payload
+        );
+
+      if (
+        !response.data?.available
+      ) {
+        setMessage(
+          response.data?.message ||
+            "Razorpay payment is not available."
+        );
+
+        setProcessing(false);
+        return;
+      }
+
+      const razorpayOrder =
+        response.data.order;
+
+      const options = {
+        key:
+          response.data.key_id,
+
+        amount:
+          razorpayOrder.amount,
+
+        currency:
+          razorpayOrder.currency,
+
+        name:
+          "PixelPlate",
+
+        description:
+          "Restaurant Order",
+
+        order_id:
+          razorpayOrder.id,
+
+        prefill: {
+          name:
+            form.customer_name,
+
+          contact:
+            form.phone
+        },
+
+        theme: {
+          color:
+            "#111111"
+        },
+
+        handler:
+          async function (
+            paymentResponse
+          ) {
+            try {
+              setMessage(
+                "Verifying payment..."
+              );
+
+              const verify =
+                await api.post(
+                  "/payments/verify",
+                  paymentResponse
+                );
+
+              localStorage.setItem(
+                "pp_last_order",
+                verify.data.id
+              );
+
+              localStorage.removeItem(
+                "pp_cart"
+              );
+
+              localStorage.removeItem(
+                "pp_table_number"
+              );
+
+              window.location.href =
+                `/order/${verify.data.id}`;
+            } catch (error) {
+              console.error(
+                "Payment verification error:",
+                error
+              );
+
+              setProcessing(false);
+
+              const detail =
+                error.response?.data
+                  ?.detail;
+
+              setMessage(
+                typeof detail ===
+                  "string"
+                  ? detail
+                  : Array.isArray(detail)
+                  ? detail
+                      .map(
+                        (item) =>
+                          item?.msg ||
+                          "Invalid input"
+                      )
+                      .join(", ")
+                  : detail?.msg ||
+                    "Payment verification failed. Please contact staff."
+              );
+            }
+          },
+
+        modal: {
+          ondismiss:
+            function () {
+              setProcessing(false);
+
+              setMessage(
+                "Payment cancelled."
+              );
+            }
+        }
+      };
+
+      const razorpay =
+        new window.Razorpay(
+          options
+        );
+
+      razorpay.on(
+        "payment.failed",
+        function () {
+          setProcessing(false);
+
+          setMessage(
+            "Payment failed. Please try again."
+          );
+        }
+      );
+
+      razorpay.open();
+    } catch (error) {
+      console.error(
+        "Razorpay error:",
+        error
+      );
+
+      setProcessing(false);
+
+      const detail =
+        error.response?.data
+          ?.detail;
+
+      setMessage(
+        typeof detail ===
+          "string"
+          ? detail
+          : Array.isArray(detail)
+          ? detail
+              .map(
+                (item) =>
+                  item?.msg ||
+                  "Invalid input"
+              )
+              .join(", ")
+          : detail?.msg ||
+            "We could not start the payment. Please try again."
+      );
+    }
+  };
 
   return (
     <>
@@ -1335,8 +1414,7 @@ function Checkout() {
             (sum, item) =>
               sum +
               Number(
-                item.quantity ||
-                  1
+                item.quantity || 1
               ),
             0
           )
@@ -1479,13 +1557,9 @@ function Checkout() {
             >
               {processing
                 ? "Processing..."
-                : `Pay ${money(
-                    total
-                  )}`}
+                : `Pay ${money(total)}`}
 
-              <ChevronRight
-                size={18}
-              />
+              <ChevronRight size={18} />
             </button>
           </section>
 
@@ -1498,28 +1572,22 @@ function Checkout() {
               (item) => {
                 const quantity =
                   Number(
-                    item.quantity ||
-                      1
+                    item.quantity || 1
                   );
 
                 const itemTotal =
                   Number(
-                    item.price ||
-                      0
+                    item.price || 0
                   ) *
-                    quantity;
+                  quantity;
 
                 return (
                   <div
-                    key={
-                      item.id
-                    }
+                    key={item.id}
                   >
                     <span>
                       {quantity} ×{" "}
-                      {
-                        item.name
-                      }
+                      {item.name}
                     </span>
 
                     <strong>
@@ -1540,9 +1608,7 @@ function Checkout() {
               </span>
 
               <strong>
-                {money(
-                  total
-                )}
+                {money(total)}
               </strong>
             </div>
           </aside>
@@ -1561,12 +1627,13 @@ function Track() {
     useParams();
 
   const [id, setId] =
-    useState(() =>
-      urlId ||
-      localStorage.getItem(
-        "pp_last_order"
-      ) ||
-      ""
+    useState(
+      () =>
+        urlId ||
+        localStorage.getItem(
+          "pp_last_order"
+        ) ||
+        ""
     );
 
   const [order, setOrder] =
@@ -1626,8 +1693,7 @@ function Track() {
         "pp_last_order"
       );
 
-    if (!orderId)
-      return;
+    if (!orderId) return;
 
     setId(orderId);
 
@@ -1816,10 +1882,7 @@ function Track() {
 
             <div className="steps">
               {statusSteps.map(
-                (
-                  s,
-                  i
-                ) => {
+                (s, i) => {
                   const completed =
                     currentStep >=
                     i;
@@ -1864,27 +1927,19 @@ function Track() {
               </p>
 
               {order.items?.map(
-                (
-                  x,
-                  index
-                ) => (
+                (x, index) => (
                   <div
                     key={`${x.item_id}-${index}`}
                   >
                     <span>
-                      {
-                        x.quantity
-                      } ×{" "}
-                      {
-                        x.name
-                      }
+                      {x.quantity} ×{" "}
+                      {x.name}
                     </span>
 
                     <strong>
                       {money(
                         Number(
-                          x.price ||
-                            0
+                          x.price || 0
                         ) *
                           Number(
                             x.quantity ||
@@ -2057,7 +2112,7 @@ function Login() {
       setError("");
 
       try {
-        const r =
+        const response =
           await api.post(
             "/auth/login",
             {
@@ -2068,31 +2123,35 @@ function Login() {
 
         localStorage.setItem(
           "pp_token",
-          r.data.token
+          response.data.token
         );
 
         if (
-          r.data.user.role ===
+          response.data.user.role ===
           "admin"
         ) {
-          nav(
-            "/admin"
-          );
+          nav("/admin");
         } else {
-          nav(
-            "/staff"
-          );
+          nav("/staff");
         }
-      } catch (e) {
+      } catch (error) {
         const detail =
-          e.response?.data?.detail;
+          error.response?.data
+            ?.detail;
 
         setError(
           typeof detail ===
             "string"
             ? detail
-            : detail?.[0]
-                ?.msg ||
+            : Array.isArray(detail)
+            ? detail
+                .map(
+                  (item) =>
+                    item?.msg ||
+                    "Invalid input"
+                )
+                .join(", ")
+            : detail?.msg ||
               "Unable to sign in"
         );
       }
@@ -2308,131 +2367,129 @@ function Staff({
       new Set()
     );
 
-  const authHeaders = {
+  const getAuthHeaders = () => ({
     Authorization:
       `Bearer ${localStorage.getItem(
         "pp_token"
       )}`
-  };
+  });
 
-  const load =
-    async () => {
-      try {
-        const response =
-          await api.get(
-            "/orders",
-            {
-              headers:
-                authHeaders
-            }
+  const load = async () => {
+    try {
+      const response =
+        await api.get(
+          "/orders",
+          {
+            headers:
+              getAuthHeaders()
+          }
+        );
+
+      const freshOrders =
+        Array.isArray(
+          response.data
+        )
+          ? response.data
+          : [];
+
+      if (
+        !firstLoadRef.current
+      ) {
+        const previousIds =
+          previousOrderIdsRef.current;
+
+        const newlyCreated =
+          freshOrders.filter(
+            (order) =>
+              !previousIds.has(
+                order.id
+              )
           );
-
-        const freshOrders =
-          Array.isArray(
-            response.data
-          )
-            ? response.data
-            : [];
 
         if (
-          !firstLoadRef.current
+          newlyCreated.length
         ) {
-          const previousIds =
-            previousOrderIdsRef.current;
+          const newMap = {};
 
-          const newlyCreated =
-            freshOrders.filter(
-              (order) =>
-                !previousIds.has(
-                  order.id
-                )
-            );
-
-          if (
-            newlyCreated.length
-          ) {
-            const newMap =
-              {};
-
-            newlyCreated.forEach(
-              (order) => {
-                newMap[
-                  order.id
-                ] = true;
-              }
-            );
-
-            setNewOrders(
-              (prev) => ({
-                ...prev,
-                ...newMap
-              })
-            );
-
-            if (
-              "Notification" in
-                window &&
-              Notification.permission ===
-                "granted"
-            ) {
-              newlyCreated.forEach(
-                (order) => {
-                  new Notification(
-                    "New PixelPlate Order",
-                    {
-                      body:
-                        `Table ${order.table_number} · ${order.customer_name}`
-                    }
-                  );
-                }
-              );
-            }
-          }
-        }
-
-        previousOrderIdsRef.current =
-          new Set(
-            freshOrders.map(
-              (order) =>
+          newlyCreated.forEach(
+            (order) => {
+              newMap[
                 order.id
-            )
+              ] = true;
+            }
           );
 
-        firstLoadRef.current =
-          false;
+          setNewOrders(
+            (prev) => ({
+              ...prev,
+              ...newMap
+            })
+          );
 
-        setOrders(
-          freshOrders
+          if (
+            "Notification" in
+              window &&
+            Notification.permission ===
+              "granted"
+          ) {
+            newlyCreated.forEach(
+              (order) => {
+                new Notification(
+                  "New PixelPlate Order",
+                  {
+                    body:
+                      `Table ${order.table_number} · ${order.customer_name}`
+                  }
+                );
+              }
+            );
+          }
+        }
+      }
+
+      previousOrderIdsRef.current =
+        new Set(
+          freshOrders.map(
+            (order) =>
+              order.id
+          )
+        );
+
+      firstLoadRef.current =
+        false;
+
+      setOrders(
+        freshOrders
+      );
+    } catch (error) {
+      console.error(
+        "Orders loading failed:",
+        error
+      );
+    }
+
+    if (admin) {
+      try {
+        const analyticsResponse =
+          await api.get(
+            "/admin/analytics",
+            {
+              headers:
+                getAuthHeaders()
+            }
+          );
+
+        setAnalytics(
+          analyticsResponse.data
         );
       } catch (error) {
         console.error(
-          "Orders loading failed:",
+          "Analytics loading failed:",
           error
         );
       }
-
-      if (admin) {
-        try {
-          const analyticsResponse =
-            await api.get(
-              "/admin/analytics",
-              {
-                headers:
-                  authHeaders
-              }
-            );
-
-          setAnalytics(
-            analyticsResponse.data
-          );
-        } catch (error) {
-          console.error(
-            "Analytics loading failed:",
-            error
-          );
-        }
-      }
-    };
+    }
+  };
 
   useEffect(() => {
     if (
@@ -2479,10 +2536,9 @@ function Staff({
             () => {
               setNewOrders(
                 (prev) => {
-                  const next =
-                    {
-                      ...prev
-                    };
+                  const next = {
+                    ...prev
+                  };
 
                   delete next[
                     orderId
@@ -2546,7 +2602,7 @@ function Staff({
           },
           {
             headers:
-              authHeaders
+              getAuthHeaders()
           }
         );
 
@@ -2560,14 +2616,22 @@ function Staff({
         await load();
 
         const detail =
-          error.response?.data?.detail;
+          error.response?.data
+            ?.detail;
 
         alert(
           typeof detail ===
             "string"
             ? detail
-            : detail?.[0]
-                ?.msg ||
+            : Array.isArray(detail)
+            ? detail
+                .map(
+                  (item) =>
+                    item?.msg ||
+                    "Invalid input"
+                )
+                .join(", ")
+            : detail?.msg ||
               "Unable to update order status."
         );
       } finally {
@@ -2654,8 +2718,6 @@ function Staff({
         {admin &&
           analytics && (
           <>
-            {/* KPI CARDS */}
-
             <div
               className="kpi-grid"
               style={{
@@ -3285,9 +3347,7 @@ function Staff({
                       ? "ticket ticket-new"
                       : "ticket"
                   }
-                  key={
-                    o.id
-                  }
+                  key={o.id}
                   data-testid={`order-ticket-${o.id}`}
                 >
                   {isNew && (
@@ -3602,8 +3662,12 @@ function QRManager() {
         String(i + 1)
     );
 
+  /* IMPORTANT:
+     LIVE FRONTEND URL FOR QR CODES
+  */
+
   const baseURL =
-    "http://192.168.1.5:3000";
+    "https://pixelplate-frontend.onrender.com";
 
   const [qrImages, setQrImages] =
     useState({});
@@ -3824,6 +3888,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+
         <Route
           path="/"
           element={
@@ -3886,9 +3951,11 @@ function App() {
             <QRManager />
           }
         />
+
       </Routes>
     </BrowserRouter>
   );
 }
 
 export default App;
+
