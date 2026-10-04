@@ -25,8 +25,7 @@ import "@/App.css";
    API CONFIGURATION
 ===================================================== */
 
-const API = "https://pixelplate-backend.onrender.com/api";
-
+const API = "http://127.0.0.1:8000/api";
 const api = axios.create({
   baseURL: API,
   withCredentials: true,
@@ -2063,14 +2062,13 @@ function Login() {
     useState("staff");
 
   const [email, setEmail] =
-    useState(
-      "staff@pixelplate.in"
-    );
-
-  const [password, setPassword] =
-    useState(
-      "Staff@123"
-    );
+  useState(
+    "staff@pixelplate.com"
+  );
+    const [password, setPassword] =
+  useState(
+    "staff123"
+  );
 
   const [error, setError] =
     useState("");
@@ -2083,24 +2081,24 @@ function Login() {
       setLoginType(type);
       setError("");
 
-      if (
-        type ===
-        "admin"
-      ) {
-        setEmail(
-          "admin@pixelplate.in"
-        );
+     if (
+  type ===
+  "admin"
+) {
+  setEmail(
+    "admin@pixelplate.com"
+  );
 
-        setPassword(
-          "Admin@123"
-        );
+  setPassword(
+    "admin123"
+  );
       } else {
         setEmail(
-          "staff@pixelplate.in"
+          "staff@pixelplate.com"
         );
 
         setPassword(
-          "Staff@123"
+          "staff123"
         );
       }
     };

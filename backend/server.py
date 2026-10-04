@@ -15,29 +15,402 @@ from typing import List, Optional
 
 import bcrypt
 import jwt
-
+import json
+import re
+import sqlite3
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 
 
 ROOT_DIR = Path(__file__).parent
 
 # ---------------------------------------------------------
-# DATABASE
+# LOCAL DATABASE
 # ---------------------------------------------------------
 
-mongo_client = AsyncIOMotorClient(os.environ["MONGO_URL"])
-db = mongo_client[os.environ["DB_NAME"]]
+LOCAL_DB_PATH = ROOT_DIR / "pixelplate.db"
+
+
+class LocalResult:
+    def __init__(self, matched_count=0, modified_count=0, deleted_count=0):
+        self.matched_count = matched_count
+        self.modified_count = modified_count
+        self.deleted_count = deleted_count
+
+
+class LocalCursor:
+    def __init__(self, documents):
+        self.documents = documents
+
+    def sort(self, field, direction):
+        reverse = direction == -1
+
+        self.documents.sort(
+            key=lambda x: (
+                x.get(field) is not None,
+                x.get(field)
+            ),
+            reverse=reverse
+        )
+
+        return self
+
+    def __aiter__(self):
+        self._index = 0
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self.documents):
+            raise StopAsyncIteration
+
+        document = self.documents[self._index]
+        self._index += 1
+
+        return document
+
+
+class LocalCollection:
+    def __init__(self, name):
+        self.name = name
+
+        with sqlite3.connect(LOCAL_DB_PATH) as connection:
+            connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS "{self.name}" (
+                    local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    data TEXT NOT NULL
+                )
+                """
+            )
+
+            connection.commit()
+
+    def _load(self):
+        with sqlite3.connect(LOCAL_DB_PATH) as connection:
+            rows = connection.execute(
+                f'SELECT local_id, data FROM "{self.name}"'
+            ).fetchall()
+
+        documents = []
+
+        for local_id, data in rows:
+            document = json.loads(data)
+            document["_local_id"] = local_id
+            documents.append(document)
+
+        return documents
+
+    def _save(self, local_id, document):
+        document = dict(document)
+        document.pop("_local_id", None)
+
+        with sqlite3.connect(LOCAL_DB_PATH) as connection:
+            connection.execute(
+                f'''
+                UPDATE "{self.name}"
+                SET data = ?
+                WHERE local_id = ?
+                ''',
+                (
+                    json.dumps(document),
+                    local_id
+                )
+            )
+
+            connection.commit()
+
+    def _matches(self, document, query):
+
+        if not query:
+            return True
+
+        if "$or" in query:
+            return any(
+                self._matches(document, condition)
+                for condition in query["$or"]
+            )
+
+        for field, expected in query.items():
+
+            if field.startswith("$"):
+                continue
+
+            actual = document.get(field)
+
+            if isinstance(expected, dict):
+
+                if "$regex" in expected:
+
+                    pattern = expected["$regex"]
+                    flags = (
+                        re.IGNORECASE
+                        if expected.get("$options") == "i"
+                        else 0
+                    )
+
+                    if actual is None:
+                        return False
+
+                    if not re.search(
+                        pattern,
+                        str(actual),
+                        flags
+                    ):
+                        return False
+
+                else:
+                    return False
+
+            else:
+
+                if actual != expected:
+                    return False
+
+        return True
+
+    async def find_one(self, query=None, projection=None):
+
+        query = query or {}
+
+        for document in self._load():
+
+            if self._matches(document, query):
+
+                document.pop("_local_id", None)
+
+                return dict(document)
+
+        return None
+
+    def find(self, query=None, projection=None):
+
+        query = query or {}
+
+        documents = [
+            dict(document)
+            for document in self._load()
+            if self._matches(document, query)
+        ]
+
+        for document in documents:
+            document.pop("_local_id", None)
+
+        return LocalCursor(documents)
+
+    async def insert_one(self, document):
+
+        document = dict(document)
+
+        document.pop("_local_id", None)
+
+        with sqlite3.connect(LOCAL_DB_PATH) as connection:
+            connection.execute(
+                f'''
+                INSERT INTO "{self.name}" (data)
+                VALUES (?)
+                ''',
+                (
+                    json.dumps(document),
+                )
+            )
+
+            connection.commit()
+
+        return LocalResult(matched_count=1)
+
+    async def insert_many(self, documents):
+
+        with sqlite3.connect(LOCAL_DB_PATH) as connection:
+
+            for document in documents:
+
+                document = dict(document)
+                document.pop("_local_id", None)
+
+                connection.execute(
+                    f'''
+                    INSERT INTO "{self.name}" (data)
+                    VALUES (?)
+                    ''',
+                    (
+                        json.dumps(document),
+                    )
+                )
+
+            connection.commit()
+
+        return LocalResult(
+            matched_count=len(documents)
+        )
+
+    async def update_one(
+        self,
+        query,
+        update,
+        upsert=False
+    ):
+
+        documents = self._load()
+
+        for document in documents:
+
+            if self._matches(document, query):
+
+                if "$set" in update:
+                    document.update(update["$set"])
+
+                local_id = document["_local_id"]
+
+                self._save(
+                    local_id,
+                    document
+                )
+
+                return LocalResult(
+                    matched_count=1,
+                    modified_count=1
+                )
+
+        if upsert:
+
+            new_document = {}
+
+            for field, value in query.items():
+
+                if not field.startswith("$"):
+                    new_document[field] = value
+
+            if "$set" in update:
+                new_document.update(
+                    update["$set"]
+                )
+
+            await self.insert_one(
+                new_document
+            )
+
+            return LocalResult(
+                matched_count=0,
+                modified_count=0
+            )
+
+        return LocalResult(
+            matched_count=0,
+            modified_count=0
+        )
+
+    async def delete_one(self, query):
+
+        documents = self._load()
+
+        for document in documents:
+
+            if self._matches(document, query):
+
+                local_id = document["_local_id"]
+
+                with sqlite3.connect(
+                    LOCAL_DB_PATH
+                ) as connection:
+
+                    connection.execute(
+                        f'''
+                        DELETE FROM "{self.name}"
+                        WHERE local_id = ?
+                        ''',
+                        (local_id,)
+                    )
+
+                    connection.commit()
+
+                return LocalResult(
+                    deleted_count=1
+                )
+
+        return LocalResult(
+            deleted_count=0
+        )
+
+    async def delete_many(self, query):
+
+        documents = self._load()
+        deleted = 0
+
+        with sqlite3.connect(
+            LOCAL_DB_PATH
+        ) as connection:
+
+            for document in documents:
+
+                if self._matches(document, query):
+
+                    connection.execute(
+                        f'''
+                        DELETE FROM "{self.name}"
+                        WHERE local_id = ?
+                        ''',
+                        (
+                            document["_local_id"],
+                        )
+                    )
+
+                    deleted += 1
+
+            connection.commit()
+
+        return LocalResult(
+            deleted_count=deleted
+        )
+
+    async def count_documents(self, query=None):
+
+        query = query or {}
+
+        return sum(
+            1
+            for document in self._load()
+            if self._matches(
+                document,
+                query
+            )
+        )
+
+    async def create_index(
+        self,
+        field,
+        unique=False
+    ):
+        # SQLite local database does not need
+        # MongoDB-style index creation here.
+        return None
+
+
+class LocalDatabase:
+    def __init__(self):
+        self.users = LocalCollection("users")
+        self.menu = LocalCollection("menu")
+        self.tables = LocalCollection("tables")
+        self.orders = LocalCollection("orders")
+        self.payments = LocalCollection("payments")
+
+
+db = LocalDatabase()
+
+
+# ---------------------------------------------------------
+# RAZORPAY
+# ---------------------------------------------------------
 
 RAZORPAY_KEY_ID = os.environ["RAZORPAY_KEY_ID"]
 RAZORPAY_KEY_SECRET = os.environ["RAZORPAY_KEY_SECRET"]
 
 razorpay_client = razorpay.Client(
-    auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
+    auth=(
+        RAZORPAY_KEY_ID,
+        RAZORPAY_KEY_SECRET
+    )
 )
-
 app = FastAPI(
     title="PixelPlate API",
     version="1.0.0"
@@ -46,7 +419,6 @@ app = FastAPI(
 api = APIRouter(prefix="/api")
 
 JWT_ALGORITHM = "HS256"
-
 
 # ---------------------------------------------------------
 # HELPERS
@@ -390,39 +762,64 @@ async def payment_order(
     )
 
     if not key or not secret:
-
-        return {
-            "available": False,
-            "message":
-            "Razorpay test credentials are not configured yet."
-        }
+        raise HTTPException(
+            503,
+            "Razorpay credentials are not configured."
+        )
 
     import requests
 
-    res = requests.post(
-        "https://api.razorpay.com/v1/orders",
+    try:
+        res = requests.post(
+            "https://api.razorpay.com/v1/orders",
 
-        auth=(key, secret),
+            auth=(key, secret),
 
-        json={
-            "amount":
-            round(body.total * 100),
+            json={
+                "amount": round(body.total * 100),
+                "currency": "INR",
+                "receipt": "pp_" + secrets.token_hex(8)
+            },
 
-            "currency":
-            "INR",
+            timeout=15
+        )
 
-            "receipt":
-            "pp_" + secrets.token_hex(8)
-        },
+        print("========== RAZORPAY RESPONSE ==========")
+        print("STATUS:", res.status_code)
+        print("BODY:", res.text)
+        print("========================================")
 
-        timeout=15
-    )
+        if res.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Razorpay error: {res.text}"
+            )
 
-    if res.status_code >= 400:
+        data = res.json()
+
+        await db.payments.insert_one(
+            {
+                "id": data["id"],
+                "status": "created",
+                "payload": body.model_dump(),
+                "created_at": now()
+            }
+        )
+
+        return {
+            "available": True,
+            "key_id": key,
+            "order": data
+        }
+
+    except requests.RequestException as e:
+        print("========== RAZORPAY CONNECTION ERROR ==========")
+        print(str(e))
+        print("================================================")
 
         raise HTTPException(
-            502,
-            "Razorpay could not create a payment order"
+            status_code=502,
+            detail=f"Could not connect to Razorpay: {str(e)}"
         )
 
     data = res.json()
@@ -2497,11 +2894,10 @@ app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://pixelplate-frontend.onrender.com",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=False,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -2513,5 +2909,4 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown():
-
-    mongo_client.close()
+    pass
